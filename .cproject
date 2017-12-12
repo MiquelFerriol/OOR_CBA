@@ -14,7 +14,7 @@
 				</extensions>
 			</storageModule>
 			<storageModule moduleId="cdtBuildSystem" version="4.0.0">
-				<configuration buildProperties="" description="" id="0.1667316365" name="Default" parent="org.eclipse.cdt.build.core.prefbase.cfg">
+				<configuration artifactName="${ProjName}" buildProperties="" description="" id="0.1667316365" name="Default" parent="org.eclipse.cdt.build.core.prefbase.cfg">
 					<folderInfo id="0.1667316365." name="/" resourcePath="">
 						<toolChain id="org.eclipse.cdt.build.core.prefbase.toolchain.514030757" name="No ToolChain" resourceTypeBasedDiscovery="false" superClass="org.eclipse.cdt.build.core.prefbase.toolchain">
 							<targetPlatform id="org.eclipse.cdt.build.core.prefbase.toolchain.514030757.1542261720" name=""/>
@@ -31,11 +31,6 @@
 							</tool>
 						</toolChain>
 					</folderInfo>
-					<fileInfo id="0.1667316365.1439598489" name="lisp_mr.c" rcbsApplicability="disable" resourcePath="oor/control/lisp_mr.c" toolsToInvoke="org.eclipse.cdt.build.core.settings.holder.1591523788.118795036">
-						<tool id="org.eclipse.cdt.build.core.settings.holder.1591523788.118795036" name="GNU C" superClass="org.eclipse.cdt.build.core.settings.holder.1591523788">
-							<inputType id="org.eclipse.cdt.build.core.settings.holder.inType.238522314" languageId="org.eclipse.cdt.core.gcc" languageName="GNU C" sourceContentType="org.eclipse.cdt.core.cSource,org.eclipse.cdt.core.cHeader" superClass="org.eclipse.cdt.build.core.settings.holder.inType"/>
-						</tool>
-					</fileInfo>
 				</configuration>
 			</storageModule>
 			<storageModule moduleId="org.eclipse.cdt.core.externalSettings"/>

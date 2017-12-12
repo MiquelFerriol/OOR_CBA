@@ -123,9 +123,9 @@ typedef struct _bc_hdr_msg {
 	uint32_t upper_nonce;
 	uint32_t lower_nonce;
 #endif
-} bc_hdr_msg;
+} __attribute__ ((__packed__)) bc_hdr_msg;
 
-//TODO To process replys of blckchain process
+//TODO To process replys of blockchain process
 int
 process_blockchain_api_msg(struct sock *sl)
 {
@@ -144,7 +144,7 @@ process_blockchain_api_msg(struct sock *sl)
 
     //uint64_t nonce = (uint64_t)(ntohl((uint32_t)lbuf_pull(b,sizeof(uint32_t)))<<32);
 
-   /* OOR_LOG(LDBG_1,"Received message from blockchain api:");
+    /*OOR_LOG(LDBG_1,"Received message from blockchain api:");
     uint32_t upper_nonce = ntohl((uint32_t)lbuf_data(b));
     lbuf_pull(b,sizeof(uint32_t));
     OOR_LOG(LDBG_1,"upper_nonce: %x",upper_nonce);
@@ -165,8 +165,7 @@ process_blockchain_api_msg(struct sock *sl)
 
     lbuf_pull(b,sizeof(bc_hdr_msg));
 
-
-	hdr = (bc_hdr_msg*)lbuf_data(b);
+	/*hdr = (bc_hdr_msg*)lbuf_data(b);
 
 	nonce = combine(ntohl(hdr->upper_nonce),ntohl(hdr->lower_nonce));
 
@@ -174,7 +173,41 @@ process_blockchain_api_msg(struct sock *sl)
 
 	OOR_LOG(LDBG_1,"NONCE2: %"PRIu64, nonce);
 
-	OOR_LOG(LDBG_1,"FLAG2: %u",hdr->flag);
+	OOR_LOG(LDBG_1,"FLAG2: %u",hdr->flag);*/
+
+	if(hdr->flag == 0){
+		OOR_LOG(LDBG_1,"Received MapServers");
+	}
+	else if(hdr->flag == 1){
+		lbuf_t* mrep = lisp_msg_create(LISP_MAP_REPLY);
+
+	    /*if (!map_loc_e) {
+	        OOR_LOG(LDBG_1,"EID %s not locally configured!",
+	                lisp_addr_to_char(deid));
+	        goto err;
+	    }*/
+	    /*map = map_local_entry_mapping(map_loc_e);
+	    lisp_msg_put_mapping(mrep, map, MREQ_RLOC_PROBE(mreq_hdr)
+	            ? &int_uc->la: NULL);*/
+		/*
+		void *mrep_hdr = lisp_msg_hdr(mrep);
+	    MREP_RLOC_PROBE(mrep_hdr) = MREQ_RLOC_PROBE(mreq_hdr);
+	    MREP_NONCE(mrep_hdr) = nonce;
+		 */
+	    /* SEND MAP-REPLY */
+	    /*if (map_reply_fill_uconn(&xtr->tr, itr_rlocs, int_uc, ext_uc, &send_uc) != GOOD){
+	        OOR_LOG(LDBG_1, "Couldn't send Map Reply, no itr_rlocs reachable");
+	        goto err;
+	    }*/
+	    OOR_LOG(LDBG_1, "Sending %s", lisp_msg_hdr_to_char(mrep));
+	    //send_msg(&xtr->super, mrep, &send_uc);
+	}
+	else{
+	    OOR_LOG(LDBG_1,"Invalid flag: %u",hdr->flag);
+	    lbuf_del(b);
+	    return (BAD);
+	}
+
 
     lbuf_del(b);
     
