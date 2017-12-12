@@ -156,6 +156,8 @@ process_blockchain_api_msg(struct sock *sl)
 
     uint64_t nonce = combine(ntohl(hdr->upper_nonce),ntohl(hdr->lower_nonce));
 
+    OOR_LOG(LDBG_1,"SIZE1: %" PRIu32, b->size);
+
     OOR_LOG(LDBG_1,"NONCE1: %"PRIu64, nonce);
 
     OOR_LOG(LDBG_1,"FLAG1: %u",hdr->flag);
@@ -163,9 +165,12 @@ process_blockchain_api_msg(struct sock *sl)
 
     lbuf_pull(b,sizeof(bc_hdr_msg));
 
-	hdr = lbuf_data(b);
+
+	hdr = (bc_hdr_msg*)lbuf_data(b);
 
 	nonce = combine(ntohl(hdr->upper_nonce),ntohl(hdr->lower_nonce));
+
+    OOR_LOG(LDBG_1,"SIZE2: %" PRIu32, b->size);
 
 	OOR_LOG(LDBG_1,"NONCE2: %"PRIu64, nonce);
 
