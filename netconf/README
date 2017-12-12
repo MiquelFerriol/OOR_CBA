@@ -1,0 +1,71 @@
+LIBNETCONF & NETOPEER INSTALLATION
+==================================
+#Install dependences
+sudo apt-get install libxslt1-dev libssh2-1-dev libcurl4-gnutls-dev xsltproc libdbus-1-dev libreadline-dev
+
+#Install PYANG
+git clone https://github.com/mbj4668/pyang.git
+cd pyang/
+sudo python setup.py install
+
+#Install libnetconf 0.9.x
+git clone https://github.com/CESNET/libnetconf.git -b 0.9.x
+cd libnetconf/
+./configure && make && sudo make install
+
+#Install netopeer-server for libnetconf 0.9.x
+git clone https://github.com/CESNET/netopeer.git -b libnetconf-0.9.x
+cd netopeer/server
+./configure && make && sudo make install
+#  Install netopeer-cli if you want to use netooper client
+cd ../cli/
+./configure && make && sudo make install
+
+#Use netopeer-configurator to configure allowed users and permissions
+
+
+OOR MODULE INSTALLATION
+=======================
+#Full instructions at https://github.com/CESNET/libnetconf/blob/master/doc/doxygen/html/d9/d25/transapi.html
+
+#Before installing the module, netopeer-server should have been started at least one time to create the database
+
+#Move to 'netconf' folder
+cd ./neteconf
+
+#Remove any previous instances
+sudo netopeer-manager rm --name lispsimple
+
+#Create skeleton files
+lnctool --model ./lispsimple.yang transapi --paths ./lispsimple.paths
+
+#Configure
+autoreconf && ./configure
+
+#Replace skeleton files
+cp oor_lispsimple.c lispsimple.c && cp oor_Makefile Makefile
+
+#Compile and install
+make clean && make && sudo make install && ./libtool --finish /usr/local/lib
+
+#Add the module to the server
+sudo netopeer-manager add --name lispsimple --model ./lispsimple.yin --transapi /usr/local/lib/lispsimple.so --datastore ./datastore.xml 
+
+#Import the dependences
+sudo netopeer-manager add --name lispsimple --import ./iana-afn-safi.yin
+
+
+CONFIGURE OOR USING NETCONF
+===========================
+#Start oor. The minimum configuration required by OOR is the operating-mode. It should be xTR or MN.
+sudo oor
+
+#Run the server
+sudo netopeer-server
+
+#Use any netconf client to configure OOR. The easiest one to test the system is netopeer-cli.
+#To check the possible parameters to be configured, have a look at the file netconf.conf.example
+
+
+
+
