@@ -22,6 +22,7 @@
 #include "../lib/mem_util.h"
 #include "../lib/oor_log.h"
 #include "../liblisp/lisp_messages.h"
+#include "../lib/timers_utils.h"
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 
@@ -125,6 +126,18 @@ typedef struct _bc_hdr_msg {
 #endif
 } __attribute__ ((__packed__)) bc_hdr_msg;
 
+
+typedef struct _bc_mapping {
+#ifdef LITTLE_ENDIANS
+	uint32_t ttl;
+	uint8_t locator_count;
+#else
+	uint16_t locator_count;
+	uint16_t ttl;
+#endif
+} __attribute__ ((__packed__)) bc_mapping;
+
+
 //TODO To process replys of blockchain process
 int
 process_blockchain_api_msg(struct sock *sl)
@@ -141,66 +154,34 @@ process_blockchain_api_msg(struct sock *sl)
 
     OOR_LOG(LDBG_1, "Received response from BlockChain API");
 
-
-    //uint64_t nonce = (uint64_t)(ntohl((uint32_t)lbuf_pull(b,sizeof(uint32_t)))<<32);
-
-    /*OOR_LOG(LDBG_1,"Received message from blockchain api:");
-    uint32_t upper_nonce = ntohl((uint32_t)lbuf_data(b));
-    lbuf_pull(b,sizeof(uint32_t));
-    OOR_LOG(LDBG_1,"upper_nonce: %x",upper_nonce);
-    uint32_t lower_nonce = ntohl((uint32_t)lbuf_data(b));
-    lbuf_pull(b,sizeof(uint32_t));
-    OOR_LOG(LDBG_1,"NONCE 1: %"PRIu64, combine(upper_nonce,lower_nonce));*/
-
     bc_hdr_msg* hdr = (bc_hdr_msg*)lbuf_data(b);
 
     uint64_t nonce = combine(ntohl(hdr->upper_nonce),ntohl(hdr->lower_nonce));
 
-    OOR_LOG(LDBG_1,"SIZE1: %" PRIu32, b->size);
+    OOR_LOG(LDBG_1,"SIZE: %" PRIu32, b->size);
 
-    OOR_LOG(LDBG_1,"NONCE1: %"PRIu64, nonce);
+    OOR_LOG(LDBG_1,"NONCE: %"PRIu64, nonce);
 
-    OOR_LOG(LDBG_1,"FLAG1: %u",hdr->flag);
+    OOR_LOG(LDBG_1,"FLAG: %u",hdr->flag);
 
 
     lbuf_pull(b,sizeof(bc_hdr_msg));
-
-	/*hdr = (bc_hdr_msg*)lbuf_data(b);
-
-	nonce = combine(ntohl(hdr->upper_nonce),ntohl(hdr->lower_nonce));
-
-    OOR_LOG(LDBG_1,"SIZE2: %" PRIu32, b->size);
-
-	OOR_LOG(LDBG_1,"NONCE2: %"PRIu64, nonce);
-
-	OOR_LOG(LDBG_1,"FLAG2: %u",hdr->flag);*/
 
 	if(hdr->flag == 0){
 		OOR_LOG(LDBG_1,"Received MapServers");
 	}
 	else if(hdr->flag == 1){
-		lbuf_t* mrep = lisp_msg_create(LISP_MAP_REPLY);
+		mapping_t *map = mapping_new();
+		locator_t *probed;
+		lisp_msg_parse_mapping_record(b,map,&probed);
 
-	    /*if (!map_loc_e) {
-	        OOR_LOG(LDBG_1,"EID %s not locally configured!",
-	                lisp_addr_to_char(deid));
-	        goto err;
-	    }*/
-	    /*map = map_local_entry_mapping(map_loc_e);
-	    lisp_msg_put_mapping(mrep, map, MREQ_RLOC_PROBE(mreq_hdr)
-	            ? &int_uc->la: NULL);*/
-		/*
-		void *mrep_hdr = lisp_msg_hdr(mrep);
-	    MREP_RLOC_PROBE(mrep_hdr) = MREQ_RLOC_PROBE(mreq_hdr);
-	    MREP_NONCE(mrep_hdr) = nonce;
-		 */
-	    /* SEND MAP-REPLY */
-	    /*if (map_reply_fill_uconn(&xtr->tr, itr_rlocs, int_uc, ext_uc, &send_uc) != GOOD){
-	        OOR_LOG(LDBG_1, "Couldn't send Map Reply, no itr_rlocs reachable");
-	        goto err;
-	    }*/
-	    OOR_LOG(LDBG_1, "Sending %s", lisp_msg_hdr_to_char(mrep));
-	    //send_msg(&xtr->super, mrep, &send_uc);
+		lbuf_t *mrep = lisp_msg_create(LISP_MAP_REPLY);
+		//OOR_LOG(LDBG_1,"Message created");
+		lisp_msg_put_mapping(mrep, map, NULL);
+		//OOR_LOG(LDBG_1,"Added mapping to msg");
+		void* mrep_hdr = lisp_msg_hdr(mrep);
+		//OOR_LOG(LDBG_1,"Created hdr message");
+		MREP_NONCE(mrep_hdr) = nonce;
 	}
 	else{
 	    OOR_LOG(LDBG_1,"Invalid flag: %u",hdr->flag);
@@ -332,6 +313,33 @@ lisp_mr_cast(oor_ctrl_dev_t *dev)
     return(CONTAINER_OF(dev, lisp_mr_t, super));
 }
 
+static int
+send_map_request_bc(oor_timer_t *timer,lisp_mr_t *mr, void *mreq_hdr, lisp_addr_t *deid)
+{
+	lbuf_t *sb;
+	sb = lisp_msg_create_buf();
+
+	OOR_LOG(LDBG_1, "NONCE: %"PRIu64, MREQ_NONCE(mreq_hdr));
+
+	void *hdr = lisp_msg_put_bc_hdr(sb,MREQ_NONCE(mreq_hdr),lisp_addr_get_iana_afi(deid));
+
+	OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
+
+	lisp_msg_put_addr(sb,deid);
+
+
+	lisp_addr_t src_addr;
+	if (lisp_addr_ippref_from_char(API_ADDR,&src_addr) != GOOD){
+		OOR_LOG(LDBG_1, "Error while address creation");
+		return BAD;
+	}
+
+	send_datagram_packet(mr->blockchain_write_api_socket, lbuf_data(sb), lbuf_size(sb), &src_addr, WR_PORT);
+
+	OOR_LOG(LDBG_1, "Requesting MR to BlockChain API");
+    return GOOD;
+}
+
 /*************************** PROCESS MESSAGES ********************************/
 
 static int
@@ -382,84 +390,22 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
     }
     OOR_LOG(LDBG_1, " dst-eid: %s", lisp_addr_to_char(deid));
 
+    int ret;
+    timer_map_req_argument *timer_arg;
+    mcache_entry_t *mce = mcache_entry_new();
+    timer_arg = timer_map_req_arg_new_init(mce,seid);
+    oor_timer_t *timer;
 
+    timer = oor_timer_with_nonce_new(BLOCKCHAIN_TIMER,mr,send_map_request_bc,
+    		itr_rlocs,(oor_timer_del_cb_arg_fn)timer_map_req_arg_free);
 
-    // TODO : Send message to the Blockchain API requesting this EID. Don't forget to
-    // use the nonce -> MREQ_NONCE(mreq_hdr)
+    htable_ptrs_timers_add(ptrs_to_timers_ht,mce,timer);
 
-    lbuf_t *sb;    
-    sb = lisp_msg_create_buf();
+    ret = send_map_request_bc(timer,mr,mreq_hdr,deid);
 
-    /*OOR_LOG(LDBG_1, "Adding NONCE");
-    OOR_LOG(LDBG_1, "Adding afi");*/
-    OOR_LOG(LDBG_1, "NONCE: %"PRIu64, MREQ_NONCE(mreq_hdr));
-    void *hdr = lisp_msg_put_bc_hdr(sb,MREQ_NONCE(mreq_hdr),lisp_addr_get_iana_afi(deid));
-    OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
-
-    //lbuf_push(sb,lisp_addr_get_iana_afi(deid),sizeof(uint16_t));
-    //OOR_LOG(LDBG_1, "Adding ip");
-    lisp_msg_put_addr(sb,deid);
-    
-
-    lisp_addr_t src_addr;
-    if (lisp_addr_ippref_from_char(API_ADDR,&src_addr) != GOOD){
-    	OOR_LOG(LDBG_1, "Error while address creation");
-    }
-/*
-    OOR_LOG(LDBG_1,"Sending message to blockchain API: %x",lbuf_data(sb));
-    OOR_LOG(LDBG_1,"Sending message to blockchain API: %02X",lbuf_data(sb));
-    OOR_LOG(LDBG_1, "NONCE: %x", ((bc_hdr_t*)lbuf_data(sb))->nonce);
-    OOR_LOG(LDBG_1, "AFI: %02X", ((bc_hdr_t*)lbuf_data(sb))->afi);*/
-    send_datagram_packet(mr->blockchain_write_api_socket, lbuf_data(sb), lbuf_size(sb), &src_addr, WR_PORT);
-
-    OOR_LOG(LDBG_1, "Requesting MR to BlockChain API");
-
-    
-    //struct sockaddr_in si_other;
-    /*char nonce[20];
-    char afi[1];
-    sprintf(nonce, "%"PRIu64, MREQ_NONCE(mreq_hdr));
-    OOR_LOG(LDBG_1, "NONCE %s",nonce);
-    sprintf (afi, "%u", lisp_addr_get_iana_afi(deid));
-    OOR_LOG(LDBG_1, "AFI %s",afi);
-    char* ip;
-    if(lisp_addr_get_iana_afi(deid) == 1){
-        char ip[8];
-        struct in_addr ipv4data;
-        inet_pton(AF_INET,  "192.168.0.1", &ipv4data);
-        sprintf(ip,"%ld",ipv4data.s_addr);
-        OOR_LOG(LDBG_1, "IPV4 %s",ip);
-    }
-    
-    else{
-        struct in6_addr ipv6data;
-        inet_pton(AF_INET6,  lisp_addr_to_char(deid), &ipv6data);
-        ip = ipv6data.s6_addr[0-15];
-        OOR_LOG(LDBG_1, "IPV6 ");
-        
-    }*/
-/*
-    memset((char *) &si_other, 0, sizeof(si_other));
-    si_other.sin_family = AF_INET;
-    si_other.sin_port = htons(WR_PORT);
-    
-    if (inet_aton("127.0.0.1", &si_other.sin_addr) == 0)
-    { 
-        OOR_LOG(LDBG_1, "inet_aton failed");
-        goto err;
-    }
-
-    OOR_LOG(LDBG_1, "SENDING MSG");
-    //send the message
-    if (sendto(mr->blockchain_write_api_socket, &sb->data, sizeof sb->data , 0 , (struct sockaddr *) &si_other, sizeof(si_other))==-1){
-        OOR_LOG(LDBG_1, "Error while sending message to blockchain");
-        goto err;
-    }
-    OOR_LOG(LDBG_1, "MSG SEND");
-    */
-
-
-
+    if (ret == BAD){
+    	mc_entry_start_expiration_timer2(xtr, mce, 10);
+	}
     /* Check the existence of the requested EID */
     // TODO: Example of how the mrep is created. This message should be created if
     // blockchain return a mapping instead of a set of MSs
