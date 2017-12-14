@@ -62,13 +62,6 @@ ctrl_dev_class_t mr_ctrl_class = {
         .get_fwd_entry = mr_get_forwarding_entry
 };
 
-struct packet {
-    uint32_t a;
-    uint32_t b;
-    unsigned char c;
-    char* d;
-};
-
 static oor_ctrl_dev_t *
 mr_ctrl_alloc()
 {
@@ -103,12 +96,7 @@ mr_ctrl_construct(oor_ctrl_dev_t *dev)
     if(mr->blockchain_write_api_socket == -1){
         OOR_LOG(LDBG_1,"Error while creating client socket");   
         goto err;
-    }typedef struct _timer_bc_argument {
-    	glist_t *itr_rlocs;
-    	lisp_mr_t *mr;
-    	lisp_addr_t *seid;
-        mcache_entry_t *mce;
-    } timer_bc_argument;
+    }
     OOR_LOG(LDBG_1,"Client socket created");   
     
     return(GOOD);
@@ -134,11 +122,70 @@ typedef struct _bc_hdr_msg {
 
 
 typedef struct _timer_bc_argument {
-	glist_t *itr_rlocs;
 	lisp_mr_t *mr;
 	lisp_addr_t *seid;
     mcache_entry_t *mce;
+    mapping_t *map;
+    lisp_addr_t *ra;
 } timer_bc_argument;
+
+static int
+build_and_send_encap_map_request(lisp_mr_t *mr, lisp_addr_t *seid,
+        mcache_entry_t *mce, uint64_t nonce, lisp_addr_t* drloc)
+{
+
+    uconn_t uc;
+    mapping_t *m = NULL;
+    lisp_addr_t *deid = NULL;
+    lisp_addr_t *srloc;
+    glist_t *rlocs = NULL;
+    lbuf_t *b = NULL;
+    void *mr_hdr = NULL;
+
+    m = mcache_entry_mapping(mce);
+    deid = mapping_eid(m);
+
+    OOR_LOG(LDBG_1, "deid: %s", lisp_addr_to_char(deid));
+    /* BUILD Map-Request */
+
+    // Rlocs to be used as ITR of the map req.
+    rlocs = ctrl_default_rlocs(mr->super.ctrl);
+    OOR_LOG(LDBG_1, "locators for req: %s", laddr_list_to_char(rlocs));
+    OOR_LOG(LDBG_1, "lisp_msg_mreq_create");
+    b = lisp_msg_mreq_create(seid, rlocs, deid);
+    if (b == NULL) {
+        OOR_LOG(LDBG_1, "build_and_send_encap_map_request: Couldn't create map request message");
+        glist_destroy(rlocs);
+        return(BAD);
+    }
+
+    OOR_LOG(LDBG_1, "lisp_msg_hdr");
+    mr_hdr = lisp_msg_hdr(b);
+    MREQ_NONCE(mr_hdr) = nonce;
+    OOR_LOG(LDBG_1, "%s, itr-rlocs:%s, src-eid: %s, req-eid: %s",
+            lisp_msg_hdr_to_char(b), laddr_list_to_char(rlocs),
+            lisp_addr_to_char(seid), lisp_addr_to_char(deid));
+    glist_destroy(rlocs);
+
+
+    /* Encapsulate message and send it to the map resolver */
+
+    lisp_msg_encap(b, LISP_CONTROL_PORT, LISP_CONTROL_PORT, seid, deid);
+
+    srloc = NULL;
+    if (!drloc){
+        lisp_msg_destroy(b);
+        return (BAD);
+    }
+
+    uconn_init(&uc, LISP_CONTROL_PORT, LISP_CONTROL_PORT, srloc, drloc);
+    send_msg(&mr->super, b, &uc);
+
+    lisp_msg_destroy(b);
+
+    return(GOOD);
+}
+
 
 //TODO To process replys of blockchain process
 int
@@ -170,7 +217,25 @@ process_blockchain_api_msg(struct sock *sl)
     lbuf_pull(b,sizeof(bc_hdr_msg));
 
 	if(hdr->flag == 0){
-		OOR_LOG(LDBG_1,"Received MapServers");
+		uint8_t* count = (uint8_t*) lbuf_data(b);
+		OOR_LOG(LDBG_1,"Count %u",*count);
+	    lbuf_pull(b,sizeof(uint8_t));
+	    lisp_addr_t* drloc = lisp_addr_new();
+	    lisp_msg_parse_addr(b,drloc);
+	    OOR_LOG(LDBG_1, " First addr: %s", lisp_addr_to_char(drloc));
+
+	    OOR_LOG(LDBG_1,"Getting timer arguments");
+
+	    OOR_LOG(LDBG_1,"Getting timer");
+		nonces_list_t *nonces = htable_nonces_lookup(nonces_ht,nonce);
+
+		if(nonces == NULL){
+			OOR_LOG(LDBG_1,"There is no timer associated with nonce %"PRIu64, nonce);
+			return BAD;
+		}
+		timer_bc_argument *timer_arg = (timer_bc_argument *)oor_timer_cb_argument(nonces->timer);
+		build_and_send_encap_map_request(timer_arg->mr,timer_arg->seid,timer_arg->mce,nonce,drloc);
+
 	}
 	else if(hdr->flag == 1){
 		mapping_t *map = mapping_new();
@@ -185,18 +250,30 @@ process_blockchain_api_msg(struct sock *sl)
 
 
 		OOR_LOG(LDBG_1,"Getting timer");
-		if(htable_nonces_lookup(nonces_ht,nonce) == NULL){
+		nonces_list_t *nonces = htable_nonces_lookup(nonces_ht,nonce);
+
+		if(nonces == NULL){
 			OOR_LOG(LDBG_1,"There is no timer associated with nonce %"PRIu64, nonce);
+			return BAD;
 		}
+
 		OOR_LOG(LDBG_1,"Getting timer arguments");
-		//timer_bc_argument *timer_arg = (timer_bc_argument *)oor_timer_cb_argument(timer);
+		timer_bc_argument *timer_arg = (timer_bc_argument *)oor_timer_cb_argument(nonces->timer);
+		OOR_LOG(LDBG_1,"ITR_LOCS");
+
+		uconn_t uc;
+
+		uconn_init(&uc, LISP_CONTROL_PORT, LISP_CONTROL_PORT, NULL, timer_arg->ra);
+
+		send_msg(&timer_arg->mr->super,mrep,&uc);
+
+	    lisp_msg_destroy(mrep);
 	}
 	else{
 	    OOR_LOG(LDBG_1,"Invalid flag: %u",hdr->flag);
 	    lbuf_del(b);
 	    return (BAD);
 	}
-
 
     lbuf_del(b);
     
@@ -220,8 +297,6 @@ static void
 mr_ctrl_run(oor_ctrl_dev_t *dev)
 {
     OOR_LOG(LDBG_1, "\nStarting OOR as a Map Resolver ...\n");
-
-
 }
 
 
@@ -326,13 +401,14 @@ lisp_mr_cast(oor_ctrl_dev_t *dev)
 /*************************** PROCESS MESSAGES ********************************/
 
 timer_bc_argument *
-timer_bc_argument_new_init(glist_t *itr_rlocs,lisp_mr_t *mr, lisp_addr_t *seid, mcache_entry_t *mce)
+timer_bc_argument_new_init(lisp_mr_t *mr, lisp_addr_t *seid, mcache_entry_t *mce, mapping_t *map, lisp_addr_t *ra)
 {
 	timer_bc_argument *timer_arg = xmalloc(sizeof(timer_bc_argument));
-    timer_arg->itr_rlocs = itr_rlocs;
     timer_arg->mr = mr;
     timer_arg->seid = lisp_addr_clone(seid);
     timer_arg->mce = mce;
+    timer_arg->map = map;
+    timer_arg->ra = lisp_addr_clone(ra);
 
     return(timer_arg);
 }
@@ -340,7 +416,6 @@ timer_bc_argument_new_init(glist_t *itr_rlocs,lisp_mr_t *mr, lisp_addr_t *seid, 
 void
 timer_bc_arg_free(timer_bc_argument * timer_arg)
 {
-    OOR_LOG(LDBG_1, "FREEEEE");
     lisp_addr_del(timer_arg->seid);
     free(timer_arg);
 }
@@ -389,9 +464,18 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
         goto err;
     }
 
+
+
     /* Process additional ITR RLOCs */
     itr_rlocs = laddr_list_new();
     lisp_msg_parse_itr_rlocs(&b, itr_rlocs);
+
+
+	OOR_LOG(LDBG_1,"glist_first_data");
+	void *data = glist_first_data(itr_rlocs);
+	OOR_LOG(LDBG_1,"lisp_addr_t");
+	lisp_addr_t* ra = (lisp_addr_t*)(data);
+    OOR_LOG(LDBG_1, " ITR-LOC %s", lisp_addr_to_char(ra));
 
     /* Process records and build Map-Reply */
 
@@ -400,24 +484,34 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
     }
     OOR_LOG(LDBG_1, " dst-eid: %s", lisp_addr_to_char(deid));
 
+
     mapping_t * m = mapping_new_init(deid);
+	locator_t *probed;
+    lisp_msg_parse_mapping_record(buf,m,&probed);
+    mcache_entry_t *mce = mcache_entry_new();
+    mcache_entry_init(mce, m);
+
+    m = mcache_entry_mapping(mce);
+    deid = mapping_eid(m);
+
+    OOR_LOG(LDBG_1, "MAP CHACE ENTRY DEID: %s", lisp_addr_to_char(deid));
+
+
     int ret;
     timer_bc_argument *timer_arg;
-    mcache_entry_t *mce = mcache_entry_new(mce, m);
 
-    //Crear propi timer map_req per processar el missatge un cop s'hagi rebut resposta de la BC
-    timer_arg = timer_bc_argument_new_init(itr_rlocs,mr,seid,mce);
+
+    timer_arg = timer_bc_argument_new_init(mr,seid,mce,m,ra);
     oor_timer_t *timer;
 
     timer = oor_timer_with_nonce_new(BLOCKCHAIN_TIMER,mr,send_map_request_bc,
-    		itr_rlocs,(oor_timer_del_cb_arg_fn)timer_bc_arg_free);
+    		timer_arg,(oor_timer_del_cb_arg_fn)timer_bc_arg_free);
 
     htable_ptrs_timers_add(ptrs_to_timers_ht,mce,timer);
 
     nonces_list_t *nonces_list = oor_timer_nonces(timer);
     htable_nonces_insert(nonces_ht, MREQ_NONCE(mreq_hdr), nonces_list);
     oor_timer_start(timer, 5);
-
 
 	lbuf_t *sb;
 	sb = lisp_msg_create_buf();
@@ -428,9 +522,7 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
 
 	OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
 
-	//lisp_msg_put_addr(sb,deid);
 	lbuf_put(sb,&(deid->ip.addr),16);
-
 
 	lisp_addr_t src_addr;
 	if (lisp_addr_ippref_from_char(API_ADDR,&src_addr) != GOOD){
