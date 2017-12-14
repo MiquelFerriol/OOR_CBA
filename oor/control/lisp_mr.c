@@ -26,6 +26,7 @@
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 
+
 #define RD_PORT 16002
 #define WR_PORT 16001
 #define API_ADDR "127.0.0.1/32"
@@ -102,7 +103,12 @@ mr_ctrl_construct(oor_ctrl_dev_t *dev)
     if(mr->blockchain_write_api_socket == -1){
         OOR_LOG(LDBG_1,"Error while creating client socket");   
         goto err;
-    }
+    }typedef struct _timer_bc_argument {
+    	glist_t *itr_rlocs;
+    	lisp_mr_t *mr;
+    	lisp_addr_t *seid;
+        mcache_entry_t *mce;
+    } timer_bc_argument;
     OOR_LOG(LDBG_1,"Client socket created");   
     
     return(GOOD);
@@ -127,16 +133,12 @@ typedef struct _bc_hdr_msg {
 } __attribute__ ((__packed__)) bc_hdr_msg;
 
 
-typedef struct _bc_mapping {
-#ifdef LITTLE_ENDIANS
-	uint32_t ttl;
-	uint8_t locator_count;
-#else
-	uint16_t locator_count;
-	uint16_t ttl;
-#endif
-} __attribute__ ((__packed__)) bc_mapping;
-
+typedef struct _timer_bc_argument {
+	glist_t *itr_rlocs;
+	lisp_mr_t *mr;
+	lisp_addr_t *seid;
+    mcache_entry_t *mce;
+} timer_bc_argument;
 
 //TODO To process replys of blockchain process
 int
@@ -175,13 +177,19 @@ process_blockchain_api_msg(struct sock *sl)
 		locator_t *probed;
 		lisp_msg_parse_mapping_record(b,map,&probed);
 
+
 		lbuf_t *mrep = lisp_msg_create(LISP_MAP_REPLY);
-		//OOR_LOG(LDBG_1,"Message created");
 		lisp_msg_put_mapping(mrep, map, NULL);
-		//OOR_LOG(LDBG_1,"Added mapping to msg");
 		void* mrep_hdr = lisp_msg_hdr(mrep);
-		//OOR_LOG(LDBG_1,"Created hdr message");
 		MREP_NONCE(mrep_hdr) = nonce;
+
+
+		OOR_LOG(LDBG_1,"Getting timer");
+		if(htable_nonces_lookup(nonces_ht,nonce) == NULL){
+			OOR_LOG(LDBG_1,"There is no timer associated with nonce %"PRIu64, nonce);
+		}
+		OOR_LOG(LDBG_1,"Getting timer arguments");
+		//timer_bc_argument *timer_arg = (timer_bc_argument *)oor_timer_cb_argument(timer);
 	}
 	else{
 	    OOR_LOG(LDBG_1,"Invalid flag: %u",hdr->flag);
@@ -313,19 +321,36 @@ lisp_mr_cast(oor_ctrl_dev_t *dev)
     return(CONTAINER_OF(dev, lisp_mr_t, super));
 }
 
-static int
-send_map_request_bc(oor_timer_t *timer,lisp_mr_t *mr, void *mreq_hdr, lisp_addr_t *deid)
-{
-    return GOOD;
-}
+
 
 /*************************** PROCESS MESSAGES ********************************/
 
-typedef struct _timer_bc {
-    mcache_entry_t  *mce;
-    lisp_addr_t     *src_eid;
-} timer_bc;
+timer_bc_argument *
+timer_bc_argument_new_init(glist_t *itr_rlocs,lisp_mr_t *mr, lisp_addr_t *seid, mcache_entry_t *mce)
+{
+	timer_bc_argument *timer_arg = xmalloc(sizeof(timer_bc_argument));
+    timer_arg->itr_rlocs = itr_rlocs;
+    timer_arg->mr = mr;
+    timer_arg->seid = lisp_addr_clone(seid);
+    timer_arg->mce = mce;
 
+    return(timer_arg);
+}
+
+void
+timer_bc_arg_free(timer_bc_argument * timer_arg)
+{
+    OOR_LOG(LDBG_1, "FREEEEE");
+    lisp_addr_del(timer_arg->seid);
+    free(timer_arg);
+}
+
+static int
+send_map_request_bc(oor_timer_t *timer)
+{
+    OOR_LOG(LDBG_1, "TIMER OUT");
+    return GOOD;
+}
 
 static int
 mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, uconn_t *ext_uc)
@@ -377,20 +402,21 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
 
     mapping_t * m = mapping_new_init(deid);
     int ret;
-    //timer_map_req_argument *timer_arg;
+    timer_bc_argument *timer_arg;
     mcache_entry_t *mce = mcache_entry_new(mce, m);
 
     //Crear propi timer map_req per processar el missatge un cop s'hagi rebut resposta de la BC
-    timer_arg = timer_map_req_arg_new_init(mce,seid);
+    timer_arg = timer_bc_argument_new_init(itr_rlocs,mr,seid,mce);
     oor_timer_t *timer;
 
     timer = oor_timer_with_nonce_new(BLOCKCHAIN_TIMER,mr,send_map_request_bc,
-    		itr_rlocs,(oor_timer_del_cb_arg_fn)timer_map_req_arg_free);
+    		itr_rlocs,(oor_timer_del_cb_arg_fn)timer_bc_arg_free);
 
     htable_ptrs_timers_add(ptrs_to_timers_ht,mce,timer);
 
-
-    //Copiar Call Back XTR per registrar Nonce
+    nonces_list_t *nonces_list = oor_timer_nonces(timer);
+    htable_nonces_insert(nonces_ht, MREQ_NONCE(mreq_hdr), nonces_list);
+    oor_timer_start(timer, 5);
 
 
 	lbuf_t *sb;
@@ -402,7 +428,8 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
 
 	OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
 
-	lisp_msg_put_addr(sb,deid);
+	//lisp_msg_put_addr(sb,deid);
+	lbuf_put(sb,&(deid->ip.addr),16);
 
 
 	lisp_addr_t src_addr;

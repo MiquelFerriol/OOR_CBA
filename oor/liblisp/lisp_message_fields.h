@@ -63,7 +63,7 @@ typedef struct _bc_hdr {
 	uint32_t upper_nonce;
 	uint32_t lower_nonce;
 	uint16_t afi;
-} bc_hdr_t;
+} __attribute__ ((__packed__)) bc_hdr_t;
 
 /*
  * LISP Canonical Address Format

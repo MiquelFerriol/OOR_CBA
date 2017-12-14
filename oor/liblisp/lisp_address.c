@@ -184,17 +184,27 @@ lisp_addr_size_to_write(lisp_addr_t *laddr)
 {
     switch (lisp_addr_lafi(laddr)) {
     case LM_AFI_NO_ADDR:
+        OOR_LOG(LDBG_2, "1");
         return (sizeof(uint16_t));
     case LM_AFI_IP:
+        OOR_LOG(LDBG_2, "lisp_addr_get_iana_afi: unknown AFI (%d)",
+                lisp_addr_lafi(laddr));
         return (ip_addr_get_size_to_write(get_ip_(laddr)));
         break;
     case LM_AFI_IPPREF:
+        OOR_LOG(LDBG_2, "2");
+        OOR_LOG(LDBG_2, "lisp_addr_get_iana_afi: unknown AFI (%d)",
+                lisp_addr_lafi(laddr));
         return (ip_addr_get_size_to_write(
                 ip_prefix_addr(get_ippref_(laddr))));
         break;
     case LM_AFI_LCAF:
+        OOR_LOG(LDBG_2, "3");
+        OOR_LOG(LDBG_2, "lisp_addr_get_iana_afi: unknown AFI (%d)",
+                lisp_addr_lafi(laddr));
         return (lcaf_addr_get_size_to_write(get_lcaf_(laddr)));
     default:
+        OOR_LOG(LDBG_2, "4");
         OOR_LOG(LDBG_3, "lisp_addr_get_size_in_pkt: not defined for afi %d",
                 lisp_addr_lafi(laddr));
         break;
