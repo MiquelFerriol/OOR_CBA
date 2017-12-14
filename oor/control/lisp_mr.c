@@ -316,31 +316,16 @@ lisp_mr_cast(oor_ctrl_dev_t *dev)
 static int
 send_map_request_bc(oor_timer_t *timer,lisp_mr_t *mr, void *mreq_hdr, lisp_addr_t *deid)
 {
-	lbuf_t *sb;
-	sb = lisp_msg_create_buf();
-
-	OOR_LOG(LDBG_1, "NONCE: %"PRIu64, MREQ_NONCE(mreq_hdr));
-
-	void *hdr = lisp_msg_put_bc_hdr(sb,MREQ_NONCE(mreq_hdr),lisp_addr_get_iana_afi(deid));
-
-	OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
-
-	lisp_msg_put_addr(sb,deid);
-
-
-	lisp_addr_t src_addr;
-	if (lisp_addr_ippref_from_char(API_ADDR,&src_addr) != GOOD){
-		OOR_LOG(LDBG_1, "Error while address creation");
-		return BAD;
-	}
-
-	send_datagram_packet(mr->blockchain_write_api_socket, lbuf_data(sb), lbuf_size(sb), &src_addr, WR_PORT);
-
-	OOR_LOG(LDBG_1, "Requesting MR to BlockChain API");
     return GOOD;
 }
 
 /*************************** PROCESS MESSAGES ********************************/
+
+typedef struct _timer_bc {
+    mcache_entry_t  *mce;
+    lisp_addr_t     *src_eid;
+} timer_bc;
+
 
 static int
 mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, uconn_t *ext_uc)
@@ -390,9 +375,12 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
     }
     OOR_LOG(LDBG_1, " dst-eid: %s", lisp_addr_to_char(deid));
 
+    mapping_t * m = mapping_new_init(deid);
     int ret;
-    timer_map_req_argument *timer_arg;
-    mcache_entry_t *mce = mcache_entry_new();
+    //timer_map_req_argument *timer_arg;
+    mcache_entry_t *mce = mcache_entry_new(mce, m);
+
+    //Crear propi timer map_req per processar el missatge un cop s'hagi rebut resposta de la BC
     timer_arg = timer_map_req_arg_new_init(mce,seid);
     oor_timer_t *timer;
 
@@ -401,35 +389,59 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
 
     htable_ptrs_timers_add(ptrs_to_timers_ht,mce,timer);
 
-    ret = send_map_request_bc(timer,mr,mreq_hdr,deid);
 
-    if (ret == BAD){
-    	mc_entry_start_expiration_timer2(xtr, mce, 10);
+    //Copiar Call Back XTR per registrar Nonce
+
+
+	lbuf_t *sb;
+	sb = lisp_msg_create_buf();
+
+	OOR_LOG(LDBG_1, "NONCE: %"PRIu64, MREQ_NONCE(mreq_hdr));
+
+	void *hdr = lisp_msg_put_bc_hdr(sb,MREQ_NONCE(mreq_hdr),lisp_addr_get_iana_afi(deid));
+
+	OOR_LOG(LDBG_1, "AFI: %u", ((bc_hdr_t*)lbuf_data(sb))->afi);
+
+	lisp_msg_put_addr(sb,deid);
+
+
+	lisp_addr_t src_addr;
+	if (lisp_addr_ippref_from_char(API_ADDR,&src_addr) != GOOD){
+		OOR_LOG(LDBG_1, "Error while address creation");
+		return BAD;
 	}
+
+	send_datagram_packet(mr->blockchain_write_api_socket, lbuf_data(sb), lbuf_size(sb), &src_addr, WR_PORT);
+
+	OOR_LOG(LDBG_1, "Requesting MR to BlockChain API");
+
+    //if (ret == BAD){
+    //	mc_entry_start_expiration_timer2(xtr, mce, 10);
+	//}
     /* Check the existence of the requested EID */
     // TODO: Example of how the mrep is created. This message should be created if
     // blockchain return a mapping instead of a set of MSs
-//    mrep = lisp_msg_create(LISP_MAP_REPLY);
-//    if (!map_loc_e) {
-//        OOR_LOG(LDBG_1,"EID %s not locally configured!",
-//                lisp_addr_to_char(deid));
-//        goto err;
-//    }
-//    map = map_local_entry_mapping(map_loc_e);
-//    lisp_msg_put_mapping(mrep, map, MREQ_RLOC_PROBE(mreq_hdr)
-//            ? &int_uc->la: NULL);
-//
-//    mrep_hdr = lisp_msg_hdr(mrep);
-//    MREP_RLOC_PROBE(mrep_hdr) = MREQ_RLOC_PROBE(mreq_hdr);
-//    MREP_NONCE(mrep_hdr) = MREQ_NONCE(mreq_hdr);
-//
-//    /* SEND MAP-REPLY */
-//    if (map_reply_fill_uconn(&xtr->tr, itr_rlocs, int_uc, ext_uc, &send_uc) != GOOD){
-//        OOR_LOG(LDBG_1, "Couldn't send Map Reply, no itr_rlocs reachable");
-//        goto err;
-//    }
-//    OOR_LOG(LDBG_1, "Sending %s", lisp_msg_hdr_to_char(mrep));
-//    send_msg(&xtr->super, mrep, &send_uc);
+	//    mrep = lisp_msg_create(LISP_MAP_REPLY);
+	//    if (!map_loc_e) {
+	//        OOR_LOG(LDBG_1,"EID %s not locally configured!",
+	//                lisp_addr_to_char(deid));
+	//        goto err;
+	//    }
+	//    map = map_local_entry_mapping(map_loc_e);
+	//    lisp_msg_put_mapping(mrep, map, MREQ_RLOC_PROBE(mreq_hdr)
+	//            ? &int_uc->la: NULL);
+	//
+	//    mrep_hdr = lisp_msg_hdr(mrep);
+	//    MREP_RLOC_PROBE(mrep_hdr) = MREQ_RLOC_PROBE(mreq_hdr);
+	//    MREP_NONCE(mrep_hdr) = MREQ_NONCE(mreq_hdr);
+	//
+	//    /* SEND MAP-REPLY */
+	//    if (map_reply_fill_uconn(&xtr->tr, itr_rlocs, int_uc, ext_uc, &send_uc) != GOOD){
+	//        OOR_LOG(LDBG_1, "Couldn't send Map Reply, no itr_rlocs reachable");
+	//        goto err;
+	//    }
+	//    OOR_LOG(LDBG_1, "Sending %s", lisp_msg_hdr_to_char(mrep));
+	//    send_msg(&xtr->super, mrep, &send_uc);
 
 done:
     glist_destroy(itr_rlocs);
