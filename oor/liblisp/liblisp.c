@@ -494,11 +494,16 @@ lisp_msg_encap(lbuf_t *b, int lp, int rp, lisp_addr_t *la, lisp_addr_t *ra)
 
 
     /* push inner ip and udp */
+
+    OOR_LOG(LDBG_1, "pkt_push_udp_and_ip");
     pkt_push_udp_and_ip(b, lp, rp,lisp_addr_ip(ip_la),lisp_addr_ip(ip_ra));
 
     /* push lisp ecm hdr */
+    OOR_LOG(LDBG_1, "lbuf_push_uninit");
     hdr = lbuf_push_uninit(b, sizeof(ecm_hdr_t));
+    OOR_LOG(LDBG_1, "ecm_hdr_init");
     ecm_hdr_init(hdr);
+    OOR_LOG(LDBG_1, "lbuf_reset_lisp_hdr");
     lbuf_reset_lisp_hdr(b);
 
     OOR_LOG(LDBG_1, "%s, inner IP: %s -> %s, inner UDP: %d -> %d",

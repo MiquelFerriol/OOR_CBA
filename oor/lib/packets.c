@@ -214,22 +214,27 @@ pkt_push_udp_and_ip(lbuf_t *b, uint16_t sp, uint16_t dp, ip_addr_t *sip,
     uint16_t udpsum;
     struct udphdr *uh;
 
+    OOR_LOG(LDBG_1, "pkt_push_udp");
     if (pkt_push_udp(b, sp, dp) == NULL) {
         OOR_LOG(LDBG_1, "Failed to push UDP header! Discarding");
         return(BAD);
     }
 
+    OOR_LOG(LDBG_1, "Failed to push UDP header! Discarding");
     lbuf_reset_udp(b);
 
+    OOR_LOG(LDBG_1, "pkt_push_ip");
     if (pkt_push_ip(b, sip, dip, IPPROTO_UDP) == NULL) {
         OOR_LOG(LDBG_1, "Failed to push IP header! Discarding");
         return(BAD);
     }
 
+    OOR_LOG(LDBG_1, "lbuf_reset_ip");
     lbuf_reset_ip(b);
 
     uh = lbuf_udp(b);
 
+    OOR_LOG(LDBG_1, "udp_checksum");
     udpsum = udp_checksum(uh, ntohs(udplen(uh)), lbuf_ip(b), ip_addr_afi(sip));
     if (udpsum == (uint16_t) ~ 0) {
         OOR_LOG(LDBG_1, "Failed UDP checksum! Discarding");
