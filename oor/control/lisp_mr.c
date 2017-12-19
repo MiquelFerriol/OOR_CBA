@@ -242,6 +242,7 @@ process_blockchain_api_msg(struct sock *sl)
 		lisp_addr_t *deid = timer_arg->deid;
 		lisp_mr_t *mr = oor_timer_owner(nonces->timer);
 		build_and_send_encap_map_request(mr,seid,mce,nonce,drloc,deid);
+		stop_timer_from_obj(mce,nonces->timer,ptrs_to_timers_ht,nonces_ht);
 
 	}
 	else if(hdr->flag == 1){
@@ -276,6 +277,9 @@ process_blockchain_api_msg(struct sock *sl)
 		send_msg(&mr->super,mrep,&uc);
 
 	    lisp_msg_destroy(mrep);
+
+		mcache_entry_t *mce = timer_arg->mce;
+		stop_timer_from_obj(mce,nonces->timer,ptrs_to_timers_ht,nonces_ht);
 	}
 	else{
 	    OOR_LOG(LDBG_1,"Invalid flag: %u",hdr->flag);
@@ -430,7 +434,11 @@ timer_bc_arg_free(timer_bc_argument * timer_arg)
 static int
 send_map_request_bc(oor_timer_t *timer)
 {
-    OOR_LOG(LDBG_1, "TIMER OUT");
+    OOR_LOG(LDBG_1, "Requested time out. Deleting timers...");
+
+	timer_bc_argument *timer_arg = (timer_bc_argument *)oor_timer_cb_argument(timer);
+	mcache_entry_t *mce = timer_arg->mce;
+	stop_timer_from_obj(mce,timer,ptrs_to_timers_ht,nonces_ht);
     return GOOD;
 }
 
@@ -502,6 +510,10 @@ mr_recv_map_request(lisp_mr_t *mr, lbuf_t *buf, void *ecm_hdr, uconn_t *int_uc, 
     int ret;
     timer_bc_argument *timer_arg;
 
+    if(lisp_addr_lafi(seid) == LM_AFI_NO_ADDR){
+		OOR_LOG(LDBG_1, "SourceEID not set. Getting new...");
+    	seid = lisp_addr_clone(&int_uc->ra);
+    }
 
     timer_arg = timer_bc_argument_new_init(seid,mce,ra,deid);
     oor_timer_t *timer;
